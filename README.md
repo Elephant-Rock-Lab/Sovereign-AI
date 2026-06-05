@@ -1,6 +1,6 @@
-# Sovereign Cortex MVP-0
+# Sovereign AI MVP-0
 
-A local-first, Python-only control-plane scaffold for building the **Sovereign Cortex**: a sovereign personal AI system that operates against auditable local workspaces instead of acting as an unconstrained chatbot.
+A local-first, Python-only control-plane scaffold for building the **Sovereign AI**: a sovereign personal AI system that operates against auditable local workspaces instead of acting as an unconstrained chatbot.
 
 MVP-0 proves the first safe loop:
 
