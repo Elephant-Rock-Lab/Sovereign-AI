@@ -10,3 +10,17 @@ def test_workspace_registry_loads_default_demo_config():
 
     assert workspace.name == "demo-project"
     assert workspace.vault_root == (repo_root / "vault" / "demo-project").resolve()
+
+
+def test_workspace_registry_loads_custom_config(tmp_path):
+    custom_vault = tmp_path / "vaults" / "custom"
+    custom_vault.mkdir(parents=True)
+    (tmp_path / "workspaces.yaml").write_text(
+        "workspaces:\n  custom:\n    vault_root: vaults/custom\n",
+        encoding="utf-8",
+    )
+
+    workspace = WorkspaceRegistry(tmp_path).get("custom")
+
+    assert workspace.name == "custom"
+    assert workspace.vault_root == custom_vault.resolve()
