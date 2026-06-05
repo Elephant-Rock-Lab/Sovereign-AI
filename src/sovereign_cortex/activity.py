@@ -10,7 +10,7 @@ class ActivityRecordStore:
     """Append EventEnvelope records to dated JSONL files."""
 
     def __init__(self, repo_root: Path):
-        self.root = repo_root / "activity"
+        self.root = repo_root / "approval_requests" / "records"
 
     def append(self, items: list[EventEnvelope]) -> list[Path]:
         paths: list[Path] = []
