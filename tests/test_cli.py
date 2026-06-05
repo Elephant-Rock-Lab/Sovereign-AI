@@ -38,6 +38,10 @@ class DummyApprovalStore:
             policy_decision=PolicyDecisionSnapshot(allowed=True, approval_required=True, reason="ok"),
         )
 
+    def prune(self, older_than_days):
+        assert older_than_days == 7
+        return []
+
 
 class DummyResolvedApprovalStore(DummyApprovalStore):
     def approve(self, approval_id):
@@ -79,6 +83,15 @@ def test_cli_approval_diff_prints_stored_patch(monkeypatch, capsys):
     assert "--- Proposed Patch ---" in captured.out
     assert "tasks/cli-diff.md" in captured.out
     assert "CLI Diff" in captured.out
+
+
+def test_cli_prune_accepts_documented_older_than_alias(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "ApprovalStore", DummyApprovalStore)
+
+    cli.main(["approvals", "prune", "--older-than", "7"])
+
+    captured = capsys.readouterr()
+    assert "Pruned 0 approval request(s)." in captured.out
 
 
 def test_cli_missing_approval_exits_cleanly(monkeypatch, capsys):
