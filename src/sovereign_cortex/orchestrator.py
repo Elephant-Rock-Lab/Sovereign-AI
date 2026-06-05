@@ -4,6 +4,7 @@ import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from .approvals import ApprovalStore
 from .events import (
     CommandPayload,
     EventEnvelope,
@@ -25,6 +26,7 @@ class LocalOrchestrator:
         self.registry = WorkspaceRegistry(repo_root)
         self.policy = PolicyEngine()
         self.git = GitAudit(repo_root)
+        self.approvals = ApprovalStore(repo_root)
 
     def handle_command(
         self,
@@ -98,11 +100,28 @@ class LocalOrchestrator:
             )
 
         if decision.approval_required and not auto_approve:
+            approval = self.approvals.create(
+                workspace=self.workspace_name,
+                command_text=text,
+                correlation_id=command_event.correlation_id,
+                patch=patch,
+                policy_decision=decision,
+            )
+            events.append(
+                self._event(
+                    EventType.APPROVAL_REQUESTED,
+                    "agent/orchestrator",
+                    "approval/local",
+                    {"approval_id": approval.approval_id, "relative_path": patch.relative_path},
+                    correlation_id=command_event.correlation_id,
+                )
+            )
             return TaskResult(
-                status="proposed",
-                message="Patch proposed and awaiting approval.",
+                status="approval_saved",
+                message=f"Patch proposed and saved for approval: {approval.approval_id}",
                 events=events,
                 patches=[patch],
+                approval_id=approval.approval_id,
             )
 
         vault.apply_patch(patch)
