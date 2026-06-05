@@ -29,6 +29,22 @@ def test_create_task_saves_create_file_approval(tmp_path):
     assert "owner: Fatima" in result.patches[0].after
 
 
+def test_create_task_auto_approve_rejects_duplicate_path_without_overwrite(tmp_path):
+    repo_root = _copy_repo(tmp_path)
+    task_path = repo_root / "vault" / "demo-project" / "tasks" / "launch-website.md"
+    before = task_path.read_text(encoding="utf-8")
+
+    result = LocalOrchestrator(repo_root).handle_command(
+        "Create task Launch Website",
+        auto_approve=True,
+    )
+
+    assert result.status == "rejected"
+    assert "target file already exists" in result.message
+    assert result.patches[0].operation == PatchOperation.CREATE_FILE
+    assert task_path.read_text(encoding="utf-8") == before
+
+
 def test_mark_task_done_saves_update_approval(tmp_path):
     repo_root = _copy_repo(tmp_path)
     result = LocalOrchestrator(repo_root).handle_command(
