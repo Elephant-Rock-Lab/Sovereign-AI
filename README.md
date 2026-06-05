@@ -2,7 +2,7 @@
 
 # Sovereign AI MVP-0
 
-A local-first, Python-only control-plane scaffold for building the **Sovereign AI**: a sovereign personal AI system that operates against auditable local workspaces instead of acting as an unconstrained chatbot.
+A local-first, Python control-plane scaffold for building **Sovereign AI**: a sovereign personal AI system that operates against auditable local workspaces instead of acting as an unconstrained chatbot.
 
 MVP-0 proves the first safe loop:
 
@@ -13,13 +13,16 @@ User command
 → Obsidian-compatible Markdown/YAML vault read
 → patch proposal
 → policy check
-→ approval gate
+→ persisted approval request
+→ approval or rejection
 → vault write
 → Git audit commit
 → user response
 ```
 
 This repository intentionally starts small. It does **not** give agents browser, shell, email, calendar, or autonomous skill-installation authority yet. Those capabilities should be added later behind capability tokens, sandboxes, event queues, and explicit approval policy.
+
+For the long-term project sequence, see [ROADMAP.md](ROADMAP.md).
 
 ---
 
@@ -39,25 +42,28 @@ MVP-0 is therefore the smallest useful seed of the larger system.
 
 - Reads a project workspace from `vault/<workspace>/`.
 - Parses Obsidian-compatible Markdown files with YAML frontmatter.
-- Recognizes a narrow demo command: moving the website launch task to next Friday.
-- Produces a patch instead of writing directly by default.
-- Evaluates the patch through a local policy engine.
-- Applies the patch only when `--auto-approve` is supplied.
+- Produces patches instead of writing directly by default.
+- Evaluates patches through a local policy engine.
+- Saves human approval requests under `approval_requests/`.
+- Approves or rejects persisted approval requests from the CLI.
+- Guards approvals against stale workspace state.
 - Commits approved changes to Git.
 - Emits canonical event envelopes that can later map onto Solace/A2A topics.
+- Runs Python tests in GitHub Actions CI.
 
 ---
 
 ## Repository layout
 
 ```text
-sovereign-cortex-mvp/
+sovereign-ai/
   src/sovereign_cortex/
     __init__.py
-    cli.py             # CLI entrypoint for the local demo loop
+    approvals.py       # persisted approval queue and conflict checks
+    cli.py             # CLI entrypoint
     events.py          # canonical event envelope and task/patch models
     git_audit.py       # Git initialization and commit wrapper
-    orchestrator.py    # local command → patch → policy → apply workflow
+    orchestrator.py    # local command → patch → policy workflow
     policy.py          # capability token and approval policy logic
     vault.py           # Markdown/YAML vault reader and writer
     workspace.py       # workspace registry and scoped capability issuance
@@ -68,12 +74,14 @@ sovereign-cortex-mvp/
       launch-website.md
 
   docs/
-    ARCHITECTURE.md    # MVP scope and future integration notes
+    ARCHITECTURE.md
 
   tests/
+    test_approvals.py
     test_orchestrator.py
     test_policy.py
 
+  ROADMAP.md
   pyproject.toml
   README.md
 ```
@@ -86,10 +94,7 @@ sovereign-cortex-mvp/
 - Git
 - A POSIX-like shell for the commands below
 
-Python dependencies are declared in `pyproject.toml`:
-
-- `pydantic`
-- `PyYAML`
+Python dependencies are declared in `pyproject.toml`.
 
 ---
 
@@ -103,7 +108,7 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-Run the safe, patch-only demo:
+Run the patch-first demo:
 
 ```bash
 python -m sovereign_cortex.cli \
@@ -113,12 +118,26 @@ python -m sovereign_cortex.cli \
 
 Expected result:
 
-- status: `proposed`
-- no file is changed
-- a unified diff is printed
-- events are printed at the end
+- an approval request is saved;
+- no project file is changed yet;
+- a unified diff is printed;
+- events are printed at the end.
 
-Apply the proposed patch and create a Git audit commit:
+Approve the saved request:
+
+```bash
+cortex approvals list
+cortex approvals show <approval-id>
+cortex approvals approve <approval-id>
+```
+
+Reject a saved request:
+
+```bash
+cortex approvals reject <approval-id> --reason "Not now"
+```
+
+For deterministic demos or trusted local development, you can still apply immediately:
 
 ```bash
 python -m sovereign_cortex.cli \
@@ -127,42 +146,40 @@ python -m sovereign_cortex.cli \
   --auto-approve
 ```
 
-You can also use the installed console script:
-
-```bash
-cortex \
-  "Move the website launch task to next Friday and explain the dependency impact" \
-  --date 2026-06-05
-```
-
 ---
 
-## Demo command behavior
+## Approval model
 
-The current orchestrator is deliberately narrow. It looks for a command containing:
-
-```text
-launch
-next friday
-```
-
-Then it reads:
+Approval artifacts are stored locally under:
 
 ```text
-vault/demo-project/tasks/launch-website.md
+approval_requests/
+  pending/*.json
+  approved/*.json
+  rejected/*.json
 ```
 
-It updates the YAML frontmatter:
+Approval records include:
 
-```yaml
-due: 2026-06-12
-updated_by: sovereign-cortex-mvp
-last_change_reason: User requested moving launch task to next Friday.
+```text
+approval_id
+status
+workspace
+command_text
+correlation_id
+patch
+policy_decision
+commit_hash
+rejection_reason
 ```
 
-It also updates the `## Cortex Notes` section with a dependency-impact note based on the task metadata.
+Approving a request applies the patch and commits the changed workspace file. Rejecting a request moves the artifact without mutating project files.
 
-This narrow behavior is intentional. The first milestone is not natural-language breadth; it is proving the safe control-plane loop.
+Approval requests are protected against stale workspace state:
+
+- update patches require the current file content to match the saved `patch.before` baseline;
+- create patches require the target file not to exist;
+- conflicts leave the approval request pending and print a clean CLI error.
 
 ---
 
@@ -170,7 +187,7 @@ This narrow behavior is intentional. The first milestone is not natural-language
 
 MVP-0 is **patch-first**.
 
-The orchestrator does not directly mutate the workspace during normal execution. It creates a `ProposedPatch`, then asks the `PolicyEngine` whether the patch is allowed and whether approval is required.
+The orchestrator creates a `ProposedPatch`, then asks the `PolicyEngine` whether the patch is allowed and whether approval is required.
 
 A patch is rejected if:
 
@@ -183,7 +200,11 @@ A patch requires approval if:
 - it is marked `requires_human_approval=True`;
 - it is medium or high risk.
 
-For MVP-0, `--auto-approve` is the temporary approval mechanism. The next milestone should replace that with persisted approval requests.
+The non-negotiable rule is:
+
+```text
+No durable write without policy, approval, and audit.
+```
 
 ---
 
@@ -191,14 +212,16 @@ For MVP-0, `--auto-approve` is the temporary approval mechanism. The next milest
 
 Events use the `EventEnvelope` model in `events.py`.
 
-Current event types:
+Current event types include:
 
 ```text
 CommandReceived
 TaskPlanned
 PolicyChecked
 PatchProposed
+ApprovalRequested
 PatchApproved
+PatchRejected
 PatchApplied
 AuditCommitted
 TaskCompleted
@@ -220,17 +243,7 @@ correlation_id
 payload
 ```
 
-The schema is intentionally compatible with a future Solace/A2A event layer. In MVP-0 the events are local objects; later they can be serialized and published onto topics such as:
-
-```text
-user/{channel}/command
-task/{workspace}/created
-task/{workspace}/approved
-task/{workspace}/completed
-artifact/{workspace}/created
-memory/{workspace}/candidate
-system/heartbeat
-```
+The schema is intentionally compatible with a future Solace/A2A event layer.
 
 ---
 
@@ -252,24 +265,7 @@ notes/
 memory/
 ```
 
-The vault format is plain Markdown with YAML frontmatter. Example:
-
-```markdown
----
-id: launch-website
-title: Launch Website
-status: planned
-due: 2026-06-05
-dependencies:
-  - competitor-research
-owner: local-user
----
-# Launch Website
-
-Publish the landing page, verify analytics, and send the launch announcement.
-```
-
-This keeps the project state human-readable, Git-friendly, and compatible with Obsidian-style workflows.
+The vault format is plain Markdown with YAML frontmatter. This keeps project state human-readable, Git-friendly, and compatible with Obsidian-style workflows.
 
 ---
 
@@ -287,11 +283,7 @@ Run:
 pytest
 ```
 
-Current tests cover:
-
-- policy rejection for workspace path escape attempts;
-- policy approval behavior for scoped task patches;
-- orchestrator patch proposal for the launch task demo.
+GitHub Actions also runs the Python test suite on pushes to `main` and pull requests.
 
 ---
 
@@ -319,97 +311,17 @@ Current tests cover:
 
 ## Roadmap
 
-### MVP-0.1 — persisted approval requests
+The roadmap is maintained in [ROADMAP.md](ROADMAP.md).
 
-Replace `--auto-approve` with approval artifacts:
-
-```text
-approval_requests/
-  pending/*.json
-  approved/*.json
-  rejected/*.json
-```
-
-Target flow:
+Near-term priorities:
 
 ```text
-command
-→ patch proposed
-→ approval request saved
-→ user approves by ID
-→ patch applied
-→ Git commit
-```
-
-### MVP-0.2 — broader project operations
-
-Add support for:
-
-- creating a new task;
-- marking a task done;
-- changing task owner;
-- shifting due dates by relative intervals;
-- listing dependency impacts without applying changes.
-
-### MVP-0.3 — local API
-
-Add a FastAPI service around the orchestrator:
-
-```text
-POST /commands
-GET /approvals
-POST /approvals/{id}/approve
-POST /approvals/{id}/reject
-GET /events/{correlation_id}
-```
-
-### MVP-1 — Solace event fabric
-
-Replace direct local calls with event publication/subscription:
-
-```text
-CLI/API/QwenPaw bridge
-→ command event
-→ orchestrator worker
-→ policy event
-→ approval event
-→ patch event
-→ audit event
-```
-
-### MVP-2 — chat bridge
-
-Add a thin QwenPaw or Telegram bridge:
-
-```text
-chat message
-→ command event
-→ approval response
-→ chat reply
-```
-
-The bridge should not perform heavy reasoning or direct writes.
-
-### MVP-3 — sandboxed effectors
-
-Add OpenClaw-style tools only behind scoped capability tokens and sandboxing:
-
-- browser research;
-- safe shell commands;
-- file operations;
-- external API calls.
-
-### MVP-4 — memory and learning
-
-Add Hermes/ML-Master-style learning as candidate generation, not silent self-modification:
-
-```text
-execution trace
-→ candidate lesson
-→ evidence links
-→ conflict check
-→ approval policy
-→ committed workspace memory
+1. Finish and merge MVP-0.2 task operations.
+2. Add approval diff command.
+3. Add event log JSONL.
+4. Add workspace registry.
+5. Add local FastAPI endpoint.
+6. Add chat bridge.
 ```
 
 ---
@@ -431,17 +343,3 @@ MVP-0 does not include:
 - production authentication.
 
 Those are later phases, after the control-plane contract is stable.
-
----
-
-## Suggested next issue
-
-**Implement persisted approval requests.**
-
-Acceptance criteria:
-
-- `cortex "..."` saves a pending approval request instead of only printing a diff.
-- `cortex approvals list` shows pending approvals.
-- `cortex approvals approve <id>` applies the patch and commits it.
-- `cortex approvals reject <id>` marks the request rejected without writing files.
-- Approval artifacts are stored as JSON and include the patch, policy decision, event correlation ID, timestamp, and workspace.
