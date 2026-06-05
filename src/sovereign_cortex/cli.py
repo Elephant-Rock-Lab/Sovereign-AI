@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .activity import ActivityRecordStore
 from .approvals import ApprovalConflictError, ApprovalStore
+from .events import EventEnvelope, EventType
 from .orchestrator import LocalOrchestrator
 
 
@@ -71,6 +72,9 @@ def build_approvals_parser() -> argparse.ArgumentParser:
     show_parser = subparsers.add_parser("show", help="Show one approval request")
     show_parser.add_argument("approval_id")
 
+    diff_parser = subparsers.add_parser("diff", help="Show only the stored approval diff")
+    diff_parser.add_argument("approval_id")
+
     approve_parser = subparsers.add_parser("approve", help="Approve and apply a pending request")
     approve_parser.add_argument("approval_id")
 
@@ -78,11 +82,15 @@ def build_approvals_parser() -> argparse.ArgumentParser:
     reject_parser.add_argument("approval_id")
     reject_parser.add_argument("--reason", default="Rejected by user.")
 
+    prune_parser = subparsers.add_parser("prune", help="Archive old resolved approval requests")
+    prune_parser.add_argument("--older-than-days", "--older-than", dest="older_than_days", type=int, required=True)
+
     return parser
 
 
 def handle_approvals(repo_root: Path, args: argparse.Namespace) -> None:
     store = ApprovalStore(repo_root)
+    activity = ActivityRecordStore(repo_root)
 
     if args.approval_command == "list":
         requests = store.list(args.status)
@@ -94,7 +102,7 @@ def handle_approvals(repo_root: Path, args: argparse.Namespace) -> None:
         return
 
     if args.approval_command == "show":
-        request = store.get(args.approval_id)
+        request = get_request_or_exit(store, args.approval_id)
         print(f"Approval ID: {request.approval_id}")
         print(f"Status: {request.status}")
         print(f"Workspace: {request.workspace}")
@@ -108,13 +116,19 @@ def handle_approvals(repo_root: Path, args: argparse.Namespace) -> None:
         print_patch(request.patch.before, request.patch.after, request.patch.relative_path, request.patch.summary)
         return
 
+    if args.approval_command == "diff":
+        request = get_request_or_exit(store, args.approval_id)
+        print_patch(request.patch.before, request.patch.after, request.patch.relative_path, request.patch.summary)
+        return
+
     if args.approval_command == "approve":
         try:
             request = store.approve(args.approval_id)
-        except ApprovalConflictError as exc:
-            print(f"Approval conflict: {exc}")
-            print("No files were changed. The approval request remains pending for review or rejection.")
-            raise SystemExit(1) from None
+        except (ApprovalConflictError, FileNotFoundError, ValueError) as exc:
+            fail_expected(str(exc))
+        activity.append([
+            approval_event(EventType.PATCH_APPROVED, request.approval_id, request.workspace, request.correlation_id)
+        ])
         print(f"Approved: {request.approval_id}")
         if request.commit_hash:
             print(f"Git commit: {request.commit_hash}")
@@ -123,12 +137,52 @@ def handle_approvals(repo_root: Path, args: argparse.Namespace) -> None:
         return
 
     if args.approval_command == "reject":
-        request = store.reject(args.approval_id, args.reason)
+        try:
+            request = store.reject(args.approval_id, args.reason)
+        except (FileNotFoundError, ValueError) as exc:
+            fail_expected(str(exc))
+        activity.append([
+            approval_event(EventType.PATCH_REJECTED, request.approval_id, request.workspace, request.correlation_id)
+        ])
         print(f"Rejected: {request.approval_id}")
         print(f"Reason: {request.rejection_reason}")
         return
 
+    if args.approval_command == "prune":
+        try:
+            pruned = store.prune(args.older_than_days)
+        except ValueError as exc:
+            fail_expected(str(exc))
+        print(f"Pruned {len(pruned)} approval request(s).")
+        for request in pruned:
+            print(f"{request.approval_id} [{request.status}] {request.workspace}: {request.patch.summary}")
+        return
+
     raise ValueError(f"Unsupported approvals command: {args.approval_command}")
+
+
+def approval_event(event_type: EventType, approval_id: str, workspace: str, correlation_id: str) -> EventEnvelope:
+    event = EventEnvelope(
+        event_type=event_type,
+        sender="approval/local",
+        recipient="agent/orchestrator",
+        workspace=workspace,
+        payload={"approval_id": approval_id},
+    )
+    event.correlation_id = correlation_id
+    return event
+
+
+def get_request_or_exit(store: ApprovalStore, approval_id: str):
+    try:
+        return store.get(approval_id)
+    except FileNotFoundError as exc:
+        fail_expected(str(exc))
+
+
+def fail_expected(message: str) -> None:
+    print(f"Error: {message}")
+    raise SystemExit(1) from None
 
 
 def print_patch(before_text: str | None, after_text: str, relative_path: str, summary: str) -> None:
