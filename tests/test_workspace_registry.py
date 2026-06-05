@@ -36,3 +36,14 @@ def test_workspace_registry_reports_missing_vault(tmp_path):
 
     with pytest.raises(FileNotFoundError):
         WorkspaceRegistry(tmp_path).get("missing")
+
+
+def test_workspace_registry_rejects_repo_escape(tmp_path):
+    outside = "." + "." + "/outside"
+    (tmp_path / "workspaces.yaml").write_text(
+        f"workspaces:\n  unsafe:\n    vault_root: {outside}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="escapes repository"):
+        WorkspaceRegistry(tmp_path).get("unsafe")
