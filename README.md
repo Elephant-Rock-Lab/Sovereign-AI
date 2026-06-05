@@ -23,7 +23,7 @@ This repository intentionally starts small. It does **not** give agents browser,
 
 ## Why this exists
 
-The long-term Sovereign Cortex architecture combines local agents, workspace memory, project-native execution, event routing, and Git-backed auditability. The risk is trying to wire every component together before the control plane exists.
+The long-term Sovereign AI architecture combines local agents, workspace memory, project-native execution, event routing, and Git-backed auditability. The risk is trying to wire every component together before the control plane exists.
 
 This MVP focuses on the core invariant:
 
