@@ -80,7 +80,7 @@ def build_approvals_parser() -> argparse.ArgumentParser:
     reject_parser.add_argument("--reason", default="Rejected by user.")
 
     prune_parser = subparsers.add_parser("prune", help="Archive old resolved approval requests")
-    prune_parser.add_argument("--older-than-days", type=int, required=True)
+    prune_parser.add_argument("--older-than-days", "--older-than", dest="older_than_days", type=int, required=True)
 
     return parser
 
