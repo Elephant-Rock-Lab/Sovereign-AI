@@ -1,0 +1,3 @@
+workspaces:
+  demo-project:
+    vault_root: vault/demo-project
