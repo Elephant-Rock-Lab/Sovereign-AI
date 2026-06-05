@@ -141,6 +141,24 @@ class LocalOrchestrator:
                 approval_id=approval.approval_id,
             )
 
+        baseline_error = self._validate_patch_baseline(patch, workspace.vault_root)
+        if baseline_error:
+            events.append(
+                self._event(
+                    EventType.TASK_REJECTED,
+                    "agent/orchestrator",
+                    "user/cli",
+                    {"status": "rejected", "reason": baseline_error},
+                    correlation_id=command_event.correlation_id,
+                )
+            )
+            return TaskResult(
+                status="rejected",
+                message=baseline_error,
+                events=events,
+                patches=[patch],
+            )
+
         vault.apply_patch(patch)
         events.append(
             self._event(
@@ -370,6 +388,34 @@ class LocalOrchestrator:
             risk="low",
             requires_human_approval=True,
         )
+
+    def _validate_patch_baseline(self, patch: ProposedPatch, vault_root: Path) -> str | None:
+        target = self._resolve_vault_path(vault_root, patch.relative_path)
+
+        if patch.operation == PatchOperation.CREATE_FILE:
+            if target.exists():
+                return f"Rejected by baseline check: target file already exists: {patch.relative_path}"
+            return None
+
+        if patch.operation == PatchOperation.UPDATE_FILE:
+            if not target.exists():
+                return f"Rejected by baseline check: target file is missing: {patch.relative_path}"
+            if patch.before is None:
+                return "Rejected by baseline check: update patch has no baseline content."
+            current = target.read_text(encoding="utf-8")
+            if current != patch.before:
+                return f"Rejected by baseline check: target file changed before apply: {patch.relative_path}"
+            return None
+
+        return f"Rejected by baseline check: unsupported patch operation: {patch.operation}"
+
+    @staticmethod
+    def _resolve_vault_path(vault_root: Path, relative_path: str) -> Path:
+        path = (vault_root / relative_path).resolve()
+        root = vault_root.resolve()
+        if root not in path.parents and path != root:
+            raise ValueError(f"Patch path escapes the workspace: {relative_path}")
+        return path
 
     @staticmethod
     def _find_task(vault: Vault, keyword: str):
