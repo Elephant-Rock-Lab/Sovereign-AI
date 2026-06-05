@@ -13,7 +13,9 @@ class EventType(str, Enum):
     TASK_PLANNED = "TaskPlanned"
     POLICY_CHECKED = "PolicyChecked"
     PATCH_PROPOSED = "PatchProposed"
+    APPROVAL_REQUESTED = "ApprovalRequested"
     PATCH_APPROVED = "PatchApproved"
+    PATCH_REJECTED = "PatchRejected"
     PATCH_APPLIED = "PatchApplied"
     AUDIT_COMMITTED = "AuditCommitted"
     TASK_COMPLETED = "TaskCompleted"
@@ -67,8 +69,9 @@ class ProposedPatch(BaseModel):
 
 
 class TaskResult(BaseModel):
-    status: Literal["proposed", "applied", "rejected", "no_action"]
+    status: Literal["proposed", "approval_saved", "applied", "rejected", "no_action"]
     message: str
     events: list[EventEnvelope] = Field(default_factory=list)
     patches: list[ProposedPatch] = Field(default_factory=list)
     commit_hash: str | None = None
+    approval_id: str | None = None
