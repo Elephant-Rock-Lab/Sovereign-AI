@@ -1,0 +1,15 @@
+[project]
+name = "sovereign-cortex-mvp"
+version = "0.1.0"
+description = "Local-first Sovereign Cortex MVP control plane"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.7,<3",
+  "PyYAML>=6.0,<7"
+]
+
+[project.scripts]
+cortex = "sovereign_cortex.cli:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
