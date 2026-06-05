@@ -5,7 +5,7 @@ import difflib
 from datetime import date
 from pathlib import Path
 
-from .approvals import ApprovalStore
+from .approvals import ApprovalConflictError, ApprovalStore
 from .orchestrator import LocalOrchestrator
 
 
@@ -97,7 +97,12 @@ def handle_approvals(repo_root: Path, args: argparse.Namespace) -> None:
         return
 
     if args.approval_command == "approve":
-        request = store.approve(args.approval_id)
+        try:
+            request = store.approve(args.approval_id)
+        except ApprovalConflictError as exc:
+            print(f"Approval conflict: {exc}")
+            print("No files were changed. The approval request remains pending for review or rejection.")
+            raise SystemExit(1) from None
         print(f"Approved: {request.approval_id}")
         if request.commit_hash:
             print(f"Git commit: {request.commit_hash}")
