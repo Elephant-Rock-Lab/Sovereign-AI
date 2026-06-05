@@ -8,13 +8,17 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from .events import ProposedPatch
+from .events import PatchOperation, ProposedPatch
 from .git_audit import GitAudit
 from .policy import PolicyDecision
 from .vault import Vault
 from .workspace import WorkspaceRegistry
 
 ApprovalStatus = Literal["pending", "approved", "rejected"]
+
+
+class ApprovalConflictError(RuntimeError):
+    """Raised when an approval request no longer matches current workspace state."""
 
 
 class PolicyDecisionSnapshot(BaseModel):
@@ -103,6 +107,7 @@ class ApprovalStore:
         registry = WorkspaceRegistry(self.repo_root)
         workspace = registry.get(request.workspace)
         vault = Vault(workspace.vault_root)
+        self._ensure_patch_is_current(request, workspace.vault_root)
         vault.apply_patch(request.patch)
 
         git = GitAudit(self.repo_root)
@@ -134,6 +139,44 @@ class ApprovalStore:
         )
         self._move(request, updated)
         return updated
+
+    def _ensure_patch_is_current(self, request: ApprovalRequest, vault_root: Path) -> None:
+        target = self._resolve_vault_path(vault_root, request.patch.relative_path)
+
+        if request.patch.operation == PatchOperation.CREATE_FILE:
+            if target.exists():
+                raise ApprovalConflictError(
+                    f"Cannot approve {request.approval_id}: target file already exists: {request.patch.relative_path}"
+                )
+            return
+
+        if request.patch.operation == PatchOperation.UPDATE_FILE:
+            if not target.exists():
+                raise ApprovalConflictError(
+                    f"Cannot approve {request.approval_id}: target file is missing: {request.patch.relative_path}"
+                )
+            current = target.read_text(encoding="utf-8")
+            expected = request.patch.before
+            if expected is None:
+                raise ApprovalConflictError(
+                    f"Cannot approve {request.approval_id}: update patch has no baseline content."
+                )
+            if current != expected:
+                raise ApprovalConflictError(
+                    f"Cannot approve {request.approval_id}: target file changed after approval was requested: "
+                    f"{request.patch.relative_path}"
+                )
+            return
+
+        raise ApprovalConflictError(f"Unsupported patch operation: {request.patch.operation}")
+
+    @staticmethod
+    def _resolve_vault_path(vault_root: Path, relative_path: str) -> Path:
+        path = (vault_root / relative_path).resolve()
+        root = vault_root.resolve()
+        if root not in path.parents and path != root:
+            raise ApprovalConflictError(f"Patch path escapes the workspace: {relative_path}")
+        return path
 
     def _ensure_dirs(self) -> None:
         self.pending_dir.mkdir(parents=True, exist_ok=True)
