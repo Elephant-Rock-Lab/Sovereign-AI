@@ -1,3 +1,5 @@
+![Project Banner](https://github.com/Elephant-Rock-Lab/Sovereign-AI/blob/ef51175e54ef712ba235b58d1b3e74e44ed14507/Banner.png)
+
 # Sovereign AI MVP-0
 
 A local-first, Python-only control-plane scaffold for building the **Sovereign AI**: a sovereign personal AI system that operates against auditable local workspaces instead of acting as an unconstrained chatbot.
