@@ -6,6 +6,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from .activity import ActivityRecordStore
 from .approvals import ApprovalConflictError, ApprovalStore
 from .orchestrator import LocalOrchestrator
 
@@ -28,6 +29,7 @@ def main(argv: list[str] | None = None) -> None:
     today = date.fromisoformat(args.date) if args.date else None
     orchestrator = LocalOrchestrator(repo_root, args.workspace)
     result = orchestrator.handle_command(args.command, auto_approve=args.auto_approve, today=today)
+    ActivityRecordStore(repo_root).append(result.events)
 
     print(f"Status: {result.status}")
     print(result.message)
