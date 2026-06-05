@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import shutil
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -57,6 +57,11 @@ class ApprovalStore:
         approval_requests/pending/*.json
         approval_requests/approved/*.json
         approval_requests/rejected/*.json
+
+    Pruned approval artifacts are archived under:
+
+        approval_requests/pruned/approved/*.json
+        approval_requests/pruned/rejected/*.json
     """
 
     def __init__(self, repo_root: Path):
@@ -65,6 +70,7 @@ class ApprovalStore:
         self.pending_dir = self.root / "pending"
         self.approved_dir = self.root / "approved"
         self.rejected_dir = self.root / "rejected"
+        self.pruned_dir = self.root / "pruned"
         self._ensure_dirs()
 
     def create(
@@ -140,6 +146,30 @@ class ApprovalStore:
         self._move(request, updated)
         return updated
 
+    def prune(self, older_than_days: int) -> list[ApprovalRequest]:
+        """Archive resolved approvals older than the given age.
+
+        Pending requests are never pruned. Approved/rejected artifacts are moved to
+        approval_requests/pruned/<status>/ to preserve auditability.
+        """
+
+        if older_than_days < 0:
+            raise ValueError("older_than_days must be >= 0")
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+        pruned: list[ApprovalRequest] = []
+        for status in ("approved", "rejected"):
+            source_dir = self._dir_for_status(status)
+            target_dir = self.pruned_dir / status
+            target_dir.mkdir(parents=True, exist_ok=True)
+            for path in sorted(source_dir.glob("*.json")):
+                request = self._read(path)
+                comparison_time = request.updated_at or request.created_at
+                if comparison_time < cutoff:
+                    shutil.move(str(path), str(target_dir / path.name))
+                    pruned.append(request)
+        return pruned
+
     def _ensure_patch_is_current(self, request: ApprovalRequest, vault_root: Path) -> None:
         target = self._resolve_vault_path(vault_root, request.patch.relative_path)
 
@@ -182,6 +212,8 @@ class ApprovalStore:
         self.pending_dir.mkdir(parents=True, exist_ok=True)
         self.approved_dir.mkdir(parents=True, exist_ok=True)
         self.rejected_dir.mkdir(parents=True, exist_ok=True)
+        (self.pruned_dir / "approved").mkdir(parents=True, exist_ok=True)
+        (self.pruned_dir / "rejected").mkdir(parents=True, exist_ok=True)
 
     def _dir_for_status(self, status: ApprovalStatus) -> Path:
         match status:
@@ -207,7 +239,13 @@ class ApprovalStore:
         return ApprovalRequest.model_validate_json(path.read_text(encoding="utf-8"))
 
     def _find_path(self, approval_id: str) -> Path | None:
-        for directory in (self.pending_dir, self.approved_dir, self.rejected_dir):
+        for directory in (
+            self.pending_dir,
+            self.approved_dir,
+            self.rejected_dir,
+            self.pruned_dir / "approved",
+            self.pruned_dir / "rejected",
+        ):
             path = directory / f"{approval_id}.json"
             if path.exists():
                 return path
