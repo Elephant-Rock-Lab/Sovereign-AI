@@ -2,7 +2,7 @@ import pytest
 
 from sovereign_cortex import cli
 from sovereign_cortex.approvals import ApprovalRequest, PolicyDecisionSnapshot
-from sovereign_cortex.events import PatchOperation, ProposedPatch, TaskResult
+from sovereign_cortex.events import EventEnvelope, EventType, PatchOperation, ProposedPatch, TaskResult
 
 
 class DummyOrchestrator:
@@ -13,7 +13,25 @@ class DummyOrchestrator:
     def handle_command(self, text, *, auto_approve=False, today=None):
         assert text == "Move the website launch task to next Friday and explain the dependency impact"
         assert auto_approve is False
-        return TaskResult(status="no_action", message="dummy command handled")
+        event = EventEnvelope(
+            event_type=EventType.COMMAND_RECEIVED,
+            sender="test",
+            recipient="test",
+            workspace="demo-project",
+            payload={"text": text},
+        )
+        return TaskResult(status="no_action", message="dummy command handled", events=[event])
+
+
+class DummyRecordStore:
+    calls = []
+
+    def __init__(self, repo_root):
+        self.repo_root = repo_root
+
+    def append(self, events):
+        self.__class__.calls.append(events)
+        return []
 
 
 class DummyApprovalStore:
@@ -49,13 +67,17 @@ class DummyResolvedApprovalStore(DummyApprovalStore):
 
 
 def test_cli_accepts_natural_language_command(monkeypatch, capsys):
+    DummyRecordStore.calls = []
     monkeypatch.setattr(cli, "LocalOrchestrator", DummyOrchestrator)
+    monkeypatch.setattr(cli, "ActivityRecordStore", DummyRecordStore)
 
     cli.main(["Move the website launch task to next Friday and explain the dependency impact"])
 
     captured = capsys.readouterr()
     assert "Status: no_action" in captured.out
     assert "dummy command handled" in captured.out
+    assert len(DummyRecordStore.calls) == 1
+    assert DummyRecordStore.calls[0][0].event_type == EventType.COMMAND_RECEIVED
 
 
 def test_cli_dispatches_approvals_subcommand(monkeypatch):
