@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from sovereign_cortex.workspace import WorkspaceRegistry
 
 
@@ -24,3 +26,13 @@ def test_workspace_registry_loads_custom_config(tmp_path):
 
     assert workspace.name == "custom"
     assert workspace.vault_root == custom_vault.resolve()
+
+
+def test_workspace_registry_reports_missing_vault(tmp_path):
+    (tmp_path / "workspaces.yaml").write_text(
+        "workspaces:\n  missing:\n    vault_root: vaults/missing\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(FileNotFoundError):
+        WorkspaceRegistry(tmp_path).get("missing")
