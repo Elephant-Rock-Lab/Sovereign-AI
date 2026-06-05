@@ -9,6 +9,7 @@ def test_orchestrator_proposes_launch_patch():
         "Move the website launch task to next Friday and explain the dependency impact",
         auto_approve=False,
     )
-    assert result.status == "proposed"
+    assert result.status == "approval_saved"
     assert result.patches
+    assert result.approval_id
     assert "Launch Website" in result.patches[0].after
