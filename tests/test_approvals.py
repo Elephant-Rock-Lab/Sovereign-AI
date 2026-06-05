@@ -1,4 +1,5 @@
 import shutil
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,10 @@ def _copy_repo(tmp_path: Path) -> Path:
     ignore = shutil.ignore_patterns(".git", ".pytest_cache", "__pycache__", "approval_requests")
     shutil.copytree(source, target, ignore=ignore)
     return target
+
+
+def _rewrite_request(path: Path, request) -> None:
+    path.write_text(request.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
 
 def test_orchestrator_saves_pending_approval(tmp_path):
@@ -112,3 +117,44 @@ def test_approval_rejects_stale_create_and_keeps_request_pending(tmp_path):
 
     assert (repo_root / "approval_requests" / "pending" / f"{request.approval_id}.json").exists()
     assert target.read_text(encoding="utf-8") == "already exists\n"
+
+
+def test_approval_cannot_approve_already_rejected_request(tmp_path):
+    repo_root = _copy_repo(tmp_path)
+    result = LocalOrchestrator(repo_root).handle_command("Create task Rejected Once", auto_approve=False)
+    store = ApprovalStore(repo_root)
+    store.reject(result.approval_id, "No.")
+
+    with pytest.raises(ValueError, match="already rejected"):
+        store.approve(result.approval_id)
+
+
+def test_prune_archives_old_resolved_requests_and_keeps_pending(tmp_path):
+    repo_root = _copy_repo(tmp_path)
+    orchestrator = LocalOrchestrator(repo_root)
+    store = ApprovalStore(repo_root)
+    old_time = datetime.now(timezone.utc) - timedelta(days=3)
+
+    pending_result = orchestrator.handle_command("Create task Pending Prune Safety", auto_approve=False)
+    pending_path = repo_root / "approval_requests" / "pending" / f"{pending_result.approval_id}.json"
+    pending_request = store.get(pending_result.approval_id).model_copy(update={"created_at": old_time})
+    _rewrite_request(pending_path, pending_request)
+
+    approved_result = orchestrator.handle_command("Create task Approved Prune Safety", auto_approve=False)
+    approved = store.approve(approved_result.approval_id).model_copy(update={"updated_at": old_time})
+    approved_path = repo_root / "approval_requests" / "approved" / f"{approved.approval_id}.json"
+    _rewrite_request(approved_path, approved)
+
+    rejected_result = orchestrator.handle_command("Create task Rejected Prune Safety", auto_approve=False)
+    rejected = store.reject(rejected_result.approval_id, "No.").model_copy(update={"updated_at": old_time})
+    rejected_path = repo_root / "approval_requests" / "rejected" / f"{rejected.approval_id}.json"
+    _rewrite_request(rejected_path, rejected)
+
+    pruned = store.prune(older_than_days=1)
+
+    assert {request.approval_id for request in pruned} == {approved.approval_id, rejected.approval_id}
+    assert pending_path.exists()
+    assert not approved_path.exists()
+    assert not rejected_path.exists()
+    assert (repo_root / "approval_requests" / "pruned" / "approved" / f"{approved.approval_id}.json").exists()
+    assert (repo_root / "approval_requests" / "pruned" / "rejected" / f"{rejected.approval_id}.json").exists()
