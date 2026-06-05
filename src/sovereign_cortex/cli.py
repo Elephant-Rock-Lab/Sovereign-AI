@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -9,40 +10,20 @@ from .approvals import ApprovalConflictError, ApprovalStore
 from .orchestrator import LocalOrchestrator
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the Sovereign AI MVP local control plane.")
-    subparsers = parser.add_subparsers(dest="subcommand")
-
-    approvals = subparsers.add_parser("approvals", help="Manage persisted approval requests")
-    approval_subparsers = approvals.add_subparsers(dest="approval_command", required=True)
-
-    list_parser = approval_subparsers.add_parser("list", help="List approval requests")
-    list_parser.add_argument("--status", choices=("pending", "approved", "rejected"), default="pending")
-
-    show_parser = approval_subparsers.add_parser("show", help="Show one approval request")
-    show_parser.add_argument("approval_id")
-
-    approve_parser = approval_subparsers.add_parser("approve", help="Approve and apply a pending request")
-    approve_parser.add_argument("approval_id")
-
-    reject_parser = approval_subparsers.add_parser("reject", help="Reject a pending request without writing files")
-    reject_parser.add_argument("approval_id")
-    reject_parser.add_argument("--reason", default="Rejected by user.")
-
-    parser.add_argument("command", nargs="?", help="Natural-language project command")
-    parser.add_argument("--workspace", default="demo-project", help="Workspace name under vault/")
-    parser.add_argument("--auto-approve", action="store_true", help="Apply approved policy patches without saving an approval request")
-    parser.add_argument("--date", help="Override today's date as YYYY-MM-DD for deterministic demos")
-    args = parser.parse_args()
-
+def main(argv: list[str] | None = None) -> None:
+    args_list = list(sys.argv[1:] if argv is None else argv)
     repo_root = Path(__file__).resolve().parents[2]
 
-    if args.subcommand == "approvals":
+    if args_list and args_list[0] == "approvals":
+        args = build_approvals_parser().parse_args(args_list[1:])
         handle_approvals(repo_root, args)
         return
 
+    parser = build_command_parser()
+    args = parser.parse_args(args_list)
+
     if not args.command:
-        parser.error("command is required unless using a subcommand")
+        parser.error("command is required unless using the 'approvals' subcommand")
 
     today = date.fromisoformat(args.date) if args.date else None
     orchestrator = LocalOrchestrator(repo_root, args.workspace)
@@ -67,6 +48,35 @@ def main() -> None:
     print("\nEvents:")
     for event in result.events:
         print(f"- {event.event_type.value}: {event.sender} → {event.recipient}")
+
+
+def build_command_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run the Sovereign AI MVP local control plane.")
+    parser.add_argument("command", nargs="?", help="Natural-language project command")
+    parser.add_argument("--workspace", default="demo-project", help="Workspace name under vault/")
+    parser.add_argument("--auto-approve", action="store_true", help="Apply approved policy patches without saving an approval request")
+    parser.add_argument("--date", help="Override today's date as YYYY-MM-DD for deterministic demos")
+    return parser
+
+
+def build_approvals_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Manage persisted approval requests")
+    subparsers = parser.add_subparsers(dest="approval_command", required=True)
+
+    list_parser = subparsers.add_parser("list", help="List approval requests")
+    list_parser.add_argument("--status", choices=("pending", "approved", "rejected"), default="pending")
+
+    show_parser = subparsers.add_parser("show", help="Show one approval request")
+    show_parser.add_argument("approval_id")
+
+    approve_parser = subparsers.add_parser("approve", help="Approve and apply a pending request")
+    approve_parser.add_argument("approval_id")
+
+    reject_parser = subparsers.add_parser("reject", help="Reject a pending request without writing files")
+    reject_parser.add_argument("approval_id")
+    reject_parser.add_argument("--reason", default="Rejected by user.")
+
+    return parser
 
 
 def handle_approvals(repo_root: Path, args: argparse.Namespace) -> None:
