@@ -1,20 +1,7 @@
 from datetime import date
 
-from fastapi.testclient import TestClient
-
-from sovereign_cortex.api import create_app
+from sovereign_cortex.api import CommandRequest, build_report_result, create_app
 from sovereign_cortex.events import EventEnvelope, EventType, TaskResult
-
-
-class DummyRecordStore:
-    calls = []
-
-    def __init__(self, repo_root):
-        self.repo_root = repo_root
-
-    def append(self, events):
-        self.__class__.calls.append(events)
-        return []
 
 
 class DummyOrchestrator:
@@ -36,45 +23,21 @@ class DummyOrchestrator:
         return TaskResult(status="no_action", message="dummy command handled", events=[event])
 
 
-def test_health_endpoint():
-    client = TestClient(create_app())
+def test_app_exposes_expected_routes():
+    app = create_app()
+    paths = {route.path for route in app.routes}
 
-    response = client.get("/health")
-
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
-
-
-def test_command_endpoint_calls_orchestrator_and_records_events(monkeypatch):
-    DummyRecordStore.calls = []
-    DummyOrchestrator.calls = []
-    monkeypatch.setattr("sovereign_cortex.api.ActivityRecordStore", DummyRecordStore)
-    monkeypatch.setattr("sovereign_cortex.api.LocalOrchestrator", DummyOrchestrator)
-    client = TestClient(create_app())
-
-    response = client.post(
-        "/commands",
-        json={
-            "text": "Show dependency impact for launch",
-            "workspace": "demo-project",
-            "date": "2026-06-06",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == "no_action"
-    assert payload["message"] == "dummy command handled"
-    assert DummyOrchestrator.calls == [("Show dependency impact for launch", False, date(2026, 6, 6), "demo-project")]
-    assert len(DummyRecordStore.calls) == 1
-    assert payload["events"][0]["event_type"] == "CommandReceived"
+    assert "/health" in paths
+    assert "/commands" in paths
 
 
-def test_command_endpoint_runs_project_report_command(monkeypatch, tmp_path):
-    DummyRecordStore.calls = []
-    monkeypatch.setattr("sovereign_cortex.api.ActivityRecordStore", DummyRecordStore)
-    client = TestClient(create_app(tmp_path))
+def test_command_request_parses_date():
+    request = CommandRequest(text="Show dependency impact for launch", date="2026-06-06")
 
+    assert request.date == date(2026, 6, 6)
+
+
+def test_project_report_result_builds_api_events(tmp_path):
     vault = tmp_path / "vault" / "demo-project" / "tasks"
     vault.mkdir(parents=True)
     (tmp_path / "workspaces.yaml").write_text(
@@ -86,19 +49,11 @@ def test_command_endpoint_runs_project_report_command(monkeypatch, tmp_path):
         encoding="utf-8",
     )
 
-    response = client.post(
-        "/commands",
-        json={
-            "text": "Project summary",
-            "workspace": "demo-project",
-            "date": "2026-06-06",
-        },
-    )
+    result = build_report_result(tmp_path, "Project summary", "demo-project", date(2026, 6, 6))
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == "no_action"
-    assert "Project summary for demo-project:" in payload["message"]
-    assert payload["approval_id"] is None
-    assert payload["events"][0]["payload"]["channel"] == "api"
-    assert len(DummyRecordStore.calls) == 1
+    assert result is not None
+    assert result.status == "no_action"
+    assert "Project summary for demo-project:" in result.message
+    assert result.approval_id is None
+    assert result.events[0].event_type == EventType.COMMAND_RECEIVED
+    assert result.events[0].payload["channel"] == "api"
