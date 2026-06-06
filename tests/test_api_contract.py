@@ -1,3 +1,4 @@
+import httpx
 from fastapi.testclient import TestClient
 
 from sovereign_cortex.api import create_app
