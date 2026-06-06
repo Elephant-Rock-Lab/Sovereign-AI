@@ -89,6 +89,46 @@ def test_cli_accepts_natural_language_command(monkeypatch, capsys):
     assert DummyRecordStore.calls[0][0].event_type == EventType.COMMAND_RECEIVED
 
 
+def test_cli_project_summary_is_read_only(monkeypatch, capsys):
+    class FailingOrchestrator:
+        def __init__(self, repo_root, workspace_name="demo-project"):
+            pass
+
+        def handle_command(self, text, *, auto_approve=False, today=None):
+            raise AssertionError("Project summary should be handled before update planning")
+
+    DummyRecordStore.calls = []
+    monkeypatch.setattr(cli, "LocalOrchestrator", FailingOrchestrator)
+    monkeypatch.setattr(cli, "ActivityRecordStore", DummyRecordStore)
+
+    cli.main(["--date", "2026-06-06", "Project summary"])
+
+    captured = capsys.readouterr()
+    assert "Status: no_action" in captured.out
+    assert "Project summary for demo-project:" in captured.out
+    assert "Total tasks:" in captured.out
+    assert "planned: 1" in captured.out
+    assert "overdue: 1" in captured.out
+    assert "with_dependencies: 1" in captured.out
+    assert "Approval ID" not in captured.out
+    assert len(DummyRecordStore.calls) == 1
+    assert [event.event_type for event in DummyRecordStore.calls[0]] == [
+        EventType.COMMAND_RECEIVED,
+        EventType.TASK_COMPLETED,
+    ]
+
+
+def test_cli_project_summary_detection_does_not_intercept_update_commands():
+    result = cli.build_project_summary_result(
+        cli.Path(__file__).resolve().parents[1],
+        "Mark project status done",
+        "demo-project",
+        cli.date.fromisoformat("2026-06-06"),
+    )
+
+    assert result is None
+
+
 def test_cli_dispatches_approvals_subcommand(monkeypatch):
     calls = []
 

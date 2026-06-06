@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import re
 import sys
 from datetime import date
 from pathlib import Path
 
 from .activity import ActivityRecordStore
 from .approvals import ApprovalConflictError, ApprovalStore
-from .events import EventEnvelope, EventType
+from .events import CommandPayload, EventEnvelope, EventType, TaskResult
 from .orchestrator import LocalOrchestrator
+from .project_summary import summarize_project
+from .vault import Vault
+from .workspace import WorkspaceRegistry
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -28,8 +32,10 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("command is required unless using the 'approvals' subcommand")
 
     today = date.fromisoformat(args.date) if args.date else None
-    orchestrator = LocalOrchestrator(repo_root, args.workspace)
-    result = orchestrator.handle_command(args.command, auto_approve=args.auto_approve, today=today)
+    result = build_project_summary_result(repo_root, args.command, args.workspace, today or date.today())
+    if result is None:
+        orchestrator = LocalOrchestrator(repo_root, args.workspace)
+        result = orchestrator.handle_command(args.command, auto_approve=args.auto_approve, today=today)
     ActivityRecordStore(repo_root).append(result.events)
 
     print(f"Status: {result.status}")
@@ -86,6 +92,34 @@ def build_approvals_parser() -> argparse.ArgumentParser:
     prune_parser.add_argument("--older-than-days", "--older-than", dest="older_than_days", type=int, required=True)
 
     return parser
+
+
+def build_project_summary_result(repo_root: Path, command: str, workspace_name: str, today: date) -> TaskResult | None:
+    if not re.fullmatch(
+        r"(?:show\s+)?(?:the\s+)?(?:project|workspace)\s+(?:summary|status)|summary\s+of\s+(?:the\s+)?project|summarize\s+(?:the\s+)?project",
+        command.strip(),
+        flags=re.I,
+    ):
+        return None
+
+    workspace = WorkspaceRegistry(repo_root).get(workspace_name)
+    message = summarize_project(Vault(workspace.vault_root).list_task_docs(), workspace_name=workspace_name, today=today)
+    command_event = EventEnvelope(
+        event_type=EventType.COMMAND_RECEIVED,
+        sender="user/cli",
+        recipient="agent/orchestrator",
+        workspace=workspace_name,
+        payload=CommandPayload(text=command).model_dump(),
+    )
+    completed_event = EventEnvelope(
+        event_type=EventType.TASK_COMPLETED,
+        sender="agent/orchestrator",
+        recipient="user/cli",
+        workspace=workspace_name,
+        payload={"status": "no_action", "reason": "Project summary completed."},
+    )
+    completed_event.correlation_id = command_event.correlation_id
+    return TaskResult(status="no_action", message=message, events=[command_event, completed_event])
 
 
 def handle_approvals(repo_root: Path, args: argparse.Namespace) -> None:
