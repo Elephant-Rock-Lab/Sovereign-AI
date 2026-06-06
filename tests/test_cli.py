@@ -38,9 +38,7 @@ class DummyApprovalStore:
     def __init__(self, repo_root):
         self.repo_root = repo_root
 
-    def get(self, approval_id):
-        if approval_id == "missing":
-            raise FileNotFoundError("Approval request not found: missing")
+    def _request(self, approval_id="approval-1"):
         return ApprovalRequest(
             approval_id=approval_id,
             workspace="demo-project",
@@ -55,6 +53,17 @@ class DummyApprovalStore:
             ),
             policy_decision=PolicyDecisionSnapshot(allowed=True, approval_required=True, reason="ok"),
         )
+
+    def get(self, approval_id):
+        if approval_id == "missing":
+            raise FileNotFoundError("Approval request not found: missing")
+        return self._request(approval_id)
+
+    def approve(self, approval_id):
+        return self._request(approval_id)
+
+    def reject(self, approval_id, reason):
+        return self._request(approval_id).model_copy(update={"rejection_reason": reason})
 
     def prune(self, older_than_days):
         assert older_than_days == 7
@@ -138,3 +147,33 @@ def test_cli_already_resolved_approval_exits_cleanly(monkeypatch, capsys):
     assert exc_info.value.code == 1
     assert "Error: Approval request is already rejected: approval-1" in captured.out
     assert "Traceback" not in captured.err
+
+
+def test_cli_approval_approve_writes_activity_record(monkeypatch, capsys):
+    DummyRecordStore.calls = []
+    monkeypatch.setattr(cli, "ApprovalStore", DummyApprovalStore)
+    monkeypatch.setattr(cli, "ActivityRecordStore", DummyRecordStore)
+
+    cli.main(["approvals", "approve", "approval-1"])
+
+    captured = capsys.readouterr()
+    assert "Approved: approval-1" in captured.out
+    assert len(DummyRecordStore.calls) == 1
+    event = DummyRecordStore.calls[0][0]
+    assert event.event_type == EventType.PATCH_APPROVED
+    assert event.correlation_id == "cli-test"
+
+
+def test_cli_approval_reject_writes_activity_record(monkeypatch, capsys):
+    DummyRecordStore.calls = []
+    monkeypatch.setattr(cli, "ApprovalStore", DummyApprovalStore)
+    monkeypatch.setattr(cli, "ActivityRecordStore", DummyRecordStore)
+
+    cli.main(["approvals", "reject", "approval-1", "--reason", "No."])
+
+    captured = capsys.readouterr()
+    assert "Rejected: approval-1" in captured.out
+    assert len(DummyRecordStore.calls) == 1
+    event = DummyRecordStore.calls[0][0]
+    assert event.event_type == EventType.PATCH_REJECTED
+    assert event.correlation_id == "cli-test"
