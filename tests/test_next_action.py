@@ -66,8 +66,8 @@ def test_cli_next_action_report_is_read_only(monkeypatch, capsys):
 def test_next_action_skips_tasks_with_active_dependencies():
     report = recommend_next_action(
         [
-            _task("blocked", "Blocked Task", "planned", dependencies=["dependency"], due="2026-06-01"),
-            _task("dependency", "Dependency", "todo", due="2026-06-02"),
+            _task("waiting", "Waiting Task", "planned", dependencies=["support"], due="2026-06-01"),
+            _task("support", "Support Task", "todo", due="2026-06-10"),
             _task("ready", "Ready Task", "planned", due="2026-06-03"),
         ],
         workspace_name="demo-project",
@@ -79,11 +79,10 @@ def test_next_action_skips_tasks_with_active_dependencies():
     assert "unblocked" in report
 
 
-def test_next_action_reports_when_all_active_tasks_are_blocked():
+def test_next_action_reports_when_all_active_tasks_are_not_ready():
     report = recommend_next_action(
         [
-            _task("blocked", "Blocked Task", "planned", dependencies=["dependency"], due="2026-06-01"),
-            _task("dependency", "Dependency", "todo", due="2026-06-02"),
+            _task("waiting", "Waiting Task", "planned", dependencies=["support"], due="2026-06-01"),
         ],
         workspace_name="demo-project",
         today=date(2026, 6, 6),
