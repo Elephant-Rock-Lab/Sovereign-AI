@@ -47,6 +47,27 @@ def test_command_endpoint_runs_read_only_command_and_records_events(tmp_path):
     assert activity_files
 
 
+def test_command_endpoint_runs_project_report_command(tmp_path):
+    repo_root = _copy_repo(tmp_path)
+    client = TestClient(create_app(repo_root))
+
+    response = client.post(
+        "/commands",
+        json={
+            "text": "Project summary",
+            "workspace": "demo-project",
+            "date": "2026-06-06",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "no_action"
+    assert "Project summary for demo-project:" in payload["message"]
+    assert payload["approval_id"] is None
+    assert payload["events"][0]["payload"]["channel"] == "api"
+
+
 def test_command_endpoint_saves_approval_for_write_command(tmp_path):
     repo_root = _copy_repo(tmp_path)
     client = TestClient(create_app(repo_root))
