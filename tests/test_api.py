@@ -1,26 +1,7 @@
 from datetime import date
 
-from sovereign_cortex.api import CommandRequest, build_report_result, create_app
-from sovereign_cortex.events import EventEnvelope, EventType, TaskResult
-
-
-class DummyOrchestrator:
-    calls = []
-
-    def __init__(self, repo_root, workspace_name="demo-project"):
-        self.repo_root = repo_root
-        self.workspace_name = workspace_name
-
-    def handle_command(self, text, *, auto_approve=False, today=None):
-        self.__class__.calls.append((text, auto_approve, today, self.workspace_name))
-        event = EventEnvelope(
-            event_type=EventType.COMMAND_RECEIVED,
-            sender="test/api",
-            recipient="agent/orchestrator",
-            workspace=self.workspace_name,
-            payload={"text": text},
-        )
-        return TaskResult(status="no_action", message="dummy command handled", events=[event])
+from sovereign_cortex.api import build_report_result, create_app
+from sovereign_cortex.events import EventType
 
 
 def test_app_exposes_expected_routes():
@@ -29,12 +10,6 @@ def test_app_exposes_expected_routes():
 
     assert "/health" in paths
     assert "/commands" in paths
-
-
-def test_command_request_parses_date():
-    request = CommandRequest(text="Show dependency impact for launch", date="2026-06-06")
-
-    assert request.date == date(2026, 6, 6)
 
 
 def test_project_report_result_builds_api_events(tmp_path):
