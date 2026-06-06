@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 from .activity import ActivityRecordStore
+from .approvals import ApprovalStore
 from .events import CommandPayload, EventEnvelope, EventType, TaskResult
 from .orchestrator import LocalOrchestrator
 from .project_reports import handle_project_report
