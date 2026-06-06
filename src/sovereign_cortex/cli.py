@@ -10,6 +10,7 @@ from pathlib import Path
 from .activity import ActivityRecordStore
 from .approvals import ApprovalConflictError, ApprovalStore
 from .events import CommandPayload, EventEnvelope, EventType, TaskResult
+from .next_action import recommend_next_action
 from .orchestrator import LocalOrchestrator
 from .project_risk import summarize_risk
 from .project_summary import summarize_project
@@ -37,6 +38,8 @@ def main(argv: list[str] | None = None) -> None:
     result = build_project_summary_result(repo_root, args.command, args.workspace, effective_today)
     if result is None:
         result = build_project_risk_result(repo_root, args.command, args.workspace, effective_today)
+    if result is None:
+        result = build_next_action_result(repo_root, args.command, args.workspace, effective_today)
     if result is None:
         orchestrator = LocalOrchestrator(repo_root, args.workspace)
         result = orchestrator.handle_command(args.command, auto_approve=args.auto_approve, today=today)
@@ -122,6 +125,19 @@ def build_project_risk_result(repo_root: Path, command: str, workspace_name: str
     workspace = WorkspaceRegistry(repo_root).get(workspace_name)
     message = summarize_risk(Vault(workspace.vault_root).list_task_docs(), workspace_name=workspace_name, today=today)
     return build_read_only_result(command, workspace_name, message, "Project risk report completed.")
+
+
+def build_next_action_result(repo_root: Path, command: str, workspace_name: str, today: date) -> TaskResult | None:
+    if not re.fullmatch(
+        r"(?:show\s+)?(?:the\s+)?(?:next\s+action|recommended\s+next\s+action)|(?:what\s+is\s+)?(?:the\s+)?next\s+action|next\s+action\s+(?:for\s+)?(?:the\s+)?(?:project|workspace)",
+        command.strip(),
+        flags=re.I,
+    ):
+        return None
+
+    workspace = WorkspaceRegistry(repo_root).get(workspace_name)
+    message = recommend_next_action(Vault(workspace.vault_root).list_task_docs(), workspace_name=workspace_name, today=today)
+    return build_read_only_result(command, workspace_name, message, "Next action report completed.")
 
 
 def build_read_only_result(command: str, workspace_name: str, message: str, reason: str) -> TaskResult:
