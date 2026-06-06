@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .activity import ActivityRecordStore
 from .approvals import ApprovalConflictError, ApprovalStore
+from .events import EventEnvelope, EventType
 from .orchestrator import LocalOrchestrator
 
 
@@ -89,6 +90,7 @@ def build_approvals_parser() -> argparse.ArgumentParser:
 
 def handle_approvals(repo_root: Path, args: argparse.Namespace) -> None:
     store = ApprovalStore(repo_root)
+    activity = ActivityRecordStore(repo_root)
 
     if args.approval_command == "list":
         requests = store.list(args.status)
@@ -124,6 +126,9 @@ def handle_approvals(repo_root: Path, args: argparse.Namespace) -> None:
             request = store.approve(args.approval_id)
         except (ApprovalConflictError, FileNotFoundError, ValueError) as exc:
             fail_expected(str(exc))
+        activity.append([
+            approval_event(EventType.PATCH_APPROVED, request.approval_id, request.workspace, request.correlation_id)
+        ])
         print(f"Approved: {request.approval_id}")
         if request.commit_hash:
             print(f"Git commit: {request.commit_hash}")
@@ -136,6 +141,9 @@ def handle_approvals(repo_root: Path, args: argparse.Namespace) -> None:
             request = store.reject(args.approval_id, args.reason)
         except (FileNotFoundError, ValueError) as exc:
             fail_expected(str(exc))
+        activity.append([
+            approval_event(EventType.PATCH_REJECTED, request.approval_id, request.workspace, request.correlation_id)
+        ])
         print(f"Rejected: {request.approval_id}")
         print(f"Reason: {request.rejection_reason}")
         return
@@ -151,6 +159,18 @@ def handle_approvals(repo_root: Path, args: argparse.Namespace) -> None:
         return
 
     raise ValueError(f"Unsupported approvals command: {args.approval_command}")
+
+
+def approval_event(event_type: EventType, approval_id: str, workspace: str, correlation_id: str) -> EventEnvelope:
+    event = EventEnvelope(
+        event_type=event_type,
+        sender="approval/local",
+        recipient="agent/orchestrator",
+        workspace=workspace,
+        payload={"approval_id": approval_id},
+    )
+    event.correlation_id = correlation_id
+    return event
 
 
 def get_request_or_exit(store: ApprovalStore, approval_id: str):
