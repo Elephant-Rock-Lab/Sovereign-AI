@@ -95,7 +95,11 @@ def build_approvals_parser() -> argparse.ArgumentParser:
 
 
 def build_project_summary_result(repo_root: Path, command: str, workspace_name: str, today: date) -> TaskResult | None:
-    if not re.search(r"\b(project|workspace)\s+(summary|status)\b|\bsummary\s+of\s+(the\s+)?project\b", command, flags=re.I):
+    if not re.fullmatch(
+        r"(?:show\s+)?(?:the\s+)?(?:project|workspace)\s+(?:summary|status)|summary\s+of\s+(?:the\s+)?project|summarize\s+(?:the\s+)?project",
+        command.strip(),
+        flags=re.I,
+    ):
         return None
 
     workspace = WorkspaceRegistry(repo_root).get(workspace_name)
