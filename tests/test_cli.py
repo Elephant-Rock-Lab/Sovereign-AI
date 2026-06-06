@@ -118,6 +118,17 @@ def test_cli_project_summary_is_read_only(monkeypatch, capsys):
     ]
 
 
+def test_cli_project_summary_detection_does_not_intercept_update_commands():
+    result = cli.build_project_summary_result(
+        cli.Path(__file__).resolve().parents[1],
+        "Mark project status done",
+        "demo-project",
+        cli.date.fromisoformat("2026-06-06"),
+    )
+
+    assert result is None
+
+
 def test_cli_dispatches_approvals_subcommand(monkeypatch):
     calls = []
 
