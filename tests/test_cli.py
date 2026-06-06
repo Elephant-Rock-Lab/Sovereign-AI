@@ -110,6 +110,7 @@ def test_cli_project_summary_is_read_only(monkeypatch, capsys):
     assert "planned: 1" in captured.out
     assert "overdue: 1" in captured.out
     assert "with_dependencies: 1" in captured.out
+    assert "Dependency problems: missing: 0, active: 0" in captured.out
     assert "Approval ID" not in captured.out
     assert len(DummyRecordStore.calls) == 1
     assert [event.event_type for event in DummyRecordStore.calls[0]] == [
