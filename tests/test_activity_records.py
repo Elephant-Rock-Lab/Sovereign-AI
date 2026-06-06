@@ -4,21 +4,29 @@ from sovereign_cortex.activity import ActivityRecordStore
 from sovereign_cortex.events import EventEnvelope, EventType
 
 
-def test_activity_record_store_writes_jsonl(tmp_path):
-    event = EventEnvelope(
+def test_activity_records_are_jsonl_and_preserve_correlation_id(tmp_path):
+    first = EventEnvelope(
         event_type=EventType.COMMAND_RECEIVED,
-        sender="test",
-        recipient="test",
+        sender="cli",
+        recipient="orchestrator",
         workspace="demo-project",
-        payload={"ok": True},
+        payload={"status": "started"},
     )
+    second = EventEnvelope(
+        event_type=EventType.TASK_COMPLETED,
+        sender="orchestrator",
+        recipient="cli",
+        workspace="demo-project",
+        payload={"status": "done"},
+    )
+    second.correlation_id = first.correlation_id
 
-    paths = ActivityRecordStore(tmp_path).append([event])
+    paths = ActivityRecordStore(tmp_path).append([first, second])
 
-    assert len(paths) == 1
-    assert paths[0].exists()
+    assert len(set(paths)) == 1
     assert paths[0].suffix == ".jsonl"
-    record = json.loads(paths[0].read_text(encoding="utf-8").strip())
-    assert record["event_type"] == "CommandReceived"
-    assert record["correlation_id"] == event.correlation_id
-    assert record["payload"] == {"ok": True}
+    lines = paths[0].read_text(encoding="utf-8").splitlines()
+    records = [json.loads(line) for line in lines]
+    assert len(records) == 2
+    assert [record["event_type"] for record in records] == ["CommandReceived", "TaskCompleted"]
+    assert {record["correlation_id"] for record in records} == {first.correlation_id}
