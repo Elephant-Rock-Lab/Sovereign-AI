@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date as Date
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +19,7 @@ class CommandRequest(BaseModel):
     text: str = Field(min_length=1)
     workspace: str = "demo-project"
     auto_approve: bool = False
-    date: date | None = None
+    date: Date | None = None
 
 
 class CommandResponse(BaseModel):
@@ -40,7 +40,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
 
     @app.post("/commands", response_model=CommandResponse)
     def run_command(request: CommandRequest) -> CommandResponse:
-        today = request.date or date.today()
+        today = request.date or Date.today()
         result = build_report_result(root, request.text, request.workspace, today)
         if result is None:
             result = LocalOrchestrator(root, request.workspace).handle_command(
@@ -60,7 +60,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
     return app
 
 
-def build_report_result(repo_root: Path, command: str, workspace_name: str, today: date) -> TaskResult | None:
+def build_report_result(repo_root: Path, command: str, workspace_name: str, today: Date) -> TaskResult | None:
     workspace = WorkspaceRegistry(repo_root).get(workspace_name)
     message = handle_project_report(command, vault=Vault(workspace.vault_root), workspace_name=workspace_name, today=today)
     if message is None:
