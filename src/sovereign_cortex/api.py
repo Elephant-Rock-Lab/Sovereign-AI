@@ -18,7 +18,6 @@ from .workspace import WorkspaceRegistry
 class CommandRequest(BaseModel):
     text: str = Field(min_length=1)
     workspace: str = "demo-project"
-    auto_approve: bool = False
     date: Date | None = None
 
 
@@ -45,7 +44,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
         if result is None:
             result = LocalOrchestrator(root, request.workspace).handle_command(
                 request.text,
-                auto_approve=request.auto_approve,
+                auto_approve=False,
                 today=request.date,
             )
         ActivityRecordStore(root).append(result.events)
