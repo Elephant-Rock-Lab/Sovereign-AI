@@ -1,7 +1,7 @@
 from datetime import date
 
 from sovereign_cortex.api import CommandRequest, build_report_result, create_app
-from sovereign_cortex.events import EventType
+from sovereign_cortex.events import EventType, TaskResult
 
 
 def _endpoint(app, path: str):
@@ -52,6 +52,36 @@ def test_command_endpoint_runs_read_only_report_and_records_events(tmp_path):
     assert response.events[0]["event_type"] == "CommandReceived"
     records = list((tmp_path / "approval_requests" / "records").glob("*.jsonl"))
     assert records
+
+
+def test_command_endpoint_does_not_accept_api_auto_approve(tmp_path, monkeypatch):
+    _write_demo_workspace(tmp_path)
+    calls: dict[str, object] = {}
+
+    class StubOrchestrator:
+        def __init__(self, repo_root, workspace):
+            calls["repo_root"] = repo_root
+            calls["workspace"] = workspace
+
+        def handle_command(self, text: str, *, auto_approve: bool, today):
+            calls["text"] = text
+            calls["auto_approve"] = auto_approve
+            calls["today"] = today
+            return TaskResult(status="no_action", message="stubbed", events=[])
+
+    monkeypatch.setattr("sovereign_cortex.api.LocalOrchestrator", StubOrchestrator)
+    app = create_app(tmp_path)
+    run_command = _endpoint(app, "/commands")
+    request = CommandRequest.model_validate(
+        {"text": "Create task Security review", "date": "2026-06-06", "auto_approve": True}
+    )
+
+    response = run_command(request)
+
+    assert not hasattr(request, "auto_approve")
+    assert calls["auto_approve"] is False
+    assert response.status == "no_action"
+    assert response.message == "stubbed"
 
 
 def test_project_report_result_builds_api_events(tmp_path):
