@@ -148,6 +148,20 @@ python -m sovereign_cortex.cli \
 
 ---
 
+## Read-only project reports
+
+The control plane also supports read-only report commands. These inspect the configured workspace and emit activity records, but they do not create approval requests, propose patches, mutate vault files, or create Git commits.
+
+```bash
+python -m sovereign_cortex.cli "Project summary" --date 2026-06-06
+python -m sovereign_cortex.cli "Project risk report" --date 2026-06-06
+python -m sovereign_cortex.cli "Next action" --date 2026-06-06
+```
+
+Use these commands to understand project status before deciding whether to approve or request a write operation. For more detail, see [docs/PROJECT_REPORTS.md](docs/PROJECT_REPORTS.md).
+
+---
+
 ## Approval model
 
 Approval artifacts are stored locally under:
