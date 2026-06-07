@@ -1,7 +1,12 @@
 from datetime import date
 
+from fastapi import HTTPException
+import pytest
+
 from sovereign_cortex.api import CommandRequest, build_report_result, create_app
-from sovereign_cortex.events import EventType, TaskResult
+from sovereign_cortex.approvals import ApprovalStore
+from sovereign_cortex.events import EventType, PatchOperation, ProposedPatch, TaskResult
+from sovereign_cortex.policy import PolicyDecision
 
 
 def _endpoint(app, path: str):
@@ -24,12 +29,36 @@ def _write_demo_workspace(tmp_path):
     )
 
 
+def _write_pending_approval(tmp_path):
+    return ApprovalStore(tmp_path).create(
+        workspace="demo-project",
+        command_text="Update launch task",
+        correlation_id="test-correlation-id",
+        patch=ProposedPatch(
+            operation=PatchOperation.UPDATE_FILE,
+            relative_path="tasks/launch.md",
+            before="before",
+            after="after",
+            summary="Update launch task",
+            risk="medium",
+            requires_human_approval=True,
+        ),
+        policy_decision=PolicyDecision(
+            allowed=True,
+            approval_required=True,
+            reason="Medium-risk patch requires approval.",
+        ),
+    )
+
+
 def test_app_exposes_expected_routes():
     app = create_app()
     paths = {route.path for route in app.routes}
 
     assert "/health" in paths
     assert "/commands" in paths
+    assert "/approvals" in paths
+    assert "/approvals/{approval_id}" in paths
 
 
 def test_health_endpoint_returns_ok():
@@ -82,6 +111,41 @@ def test_command_endpoint_does_not_accept_api_auto_approve(tmp_path, monkeypatch
     assert calls["auto_approve"] is False
     assert response.status == "no_action"
     assert response.message == "stubbed"
+
+
+def test_approval_list_endpoint_returns_pending_requests(tmp_path):
+    approval = _write_pending_approval(tmp_path)
+    app = create_app(tmp_path)
+    list_approvals = _endpoint(app, "/approvals")
+
+    response = list_approvals()
+
+    assert len(response) == 1
+    assert response[0].approval_id == approval.approval_id
+    assert response[0].status == "pending"
+    assert response[0].correlation_id == "test-correlation-id"
+
+
+def test_approval_show_endpoint_returns_request(tmp_path):
+    approval = _write_pending_approval(tmp_path)
+    app = create_app(tmp_path)
+    get_approval = _endpoint(app, "/approvals/{approval_id}")
+
+    response = get_approval(approval.approval_id)
+
+    assert response.approval_id == approval.approval_id
+    assert response.command_text == "Update launch task"
+    assert response.patch.relative_path == "tasks/launch.md"
+
+
+def test_approval_show_endpoint_returns_404_for_missing_request(tmp_path):
+    app = create_app(tmp_path)
+    get_approval = _endpoint(app, "/approvals/{approval_id}")
+
+    with pytest.raises(HTTPException) as error:
+        get_approval("missing")
+
+    assert error.value.status_code == 404
 
 
 def test_project_report_result_builds_api_events(tmp_path):
