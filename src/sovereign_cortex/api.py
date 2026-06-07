@@ -4,10 +4,11 @@ from datetime import date as Date
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from .activity import ActivityRecordStore
+from .approvals import ApprovalRequest, ApprovalStatus, ApprovalStore
 from .events import CommandPayload, EventEnvelope, EventType, TaskResult
 from .orchestrator import LocalOrchestrator
 from .project_reports import handle_project_report
@@ -55,6 +56,17 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
             commit_hash=result.commit_hash,
             events=[event.model_dump(mode="json") for event in result.events],
         )
+
+    @app.get("/approvals", response_model=list[ApprovalRequest])
+    def list_approvals(status: ApprovalStatus = "pending") -> list[ApprovalRequest]:
+        return ApprovalStore(root).list(status)
+
+    @app.get("/approvals/{approval_id}", response_model=ApprovalRequest)
+    def get_approval(approval_id: str) -> ApprovalRequest:
+        try:
+            return ApprovalStore(root).get(approval_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return app
 
