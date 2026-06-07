@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from .activity import ActivityRecordStore
-from .approvals import ApprovalRequest, ApprovalStatus, ApprovalStore
+from .approvals import ApprovalConflictError, ApprovalRequest, ApprovalStatus, ApprovalStore
 from .events import CommandPayload, EventEnvelope, EventType, TaskResult
 from .orchestrator import LocalOrchestrator
 from .project_reports import handle_project_report
@@ -28,6 +28,10 @@ class CommandResponse(BaseModel):
     approval_id: str | None = None
     commit_hash: str | None = None
     events: list[dict[str, Any]]
+
+
+class RejectApprovalRequest(BaseModel):
+    reason: str | None = None
 
 
 def create_app(repo_root: Path | None = None) -> FastAPI:
@@ -67,6 +71,26 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
             return ApprovalStore(root).get(approval_id)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/approvals/{approval_id}/approve", response_model=ApprovalRequest)
+    def approve_approval(approval_id: str) -> ApprovalRequest:
+        try:
+            return ApprovalStore(root).approve(approval_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ApprovalConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/approvals/{approval_id}/reject", response_model=ApprovalRequest)
+    def reject_approval(approval_id: str, request: RejectApprovalRequest) -> ApprovalRequest:
+        try:
+            return ApprovalStore(root).reject(approval_id, request.reason)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return app
 
