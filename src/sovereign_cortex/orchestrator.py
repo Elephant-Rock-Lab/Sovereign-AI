@@ -14,6 +14,7 @@ from .events import (
     TaskResult,
 )
 from .git_audit import GitAudit
+from .patch_restore import restore_patch_target_on_error
 from .policy import PolicyEngine
 from .vault import Vault, render_markdown
 from .workspace import WorkspaceRegistry
@@ -159,21 +160,22 @@ class LocalOrchestrator:
                 patches=[patch],
             )
 
-        vault.apply_patch(patch)
-        events.append(
-            self._event(
-                EventType.PATCH_APPLIED,
-                "agent/orchestrator",
-                "vault/demo-project",
-                {"relative_path": patch.relative_path},
-                correlation_id=command_event.correlation_id,
+        with restore_patch_target_on_error(workspace.vault_root, patch):
+            vault.apply_patch(patch)
+            events.append(
+                self._event(
+                    EventType.PATCH_APPLIED,
+                    "agent/orchestrator",
+                    "vault/demo-project",
+                    {"relative_path": patch.relative_path},
+                    correlation_id=command_event.correlation_id,
+                )
             )
-        )
 
-        commit_hash = self.git.commit_paths(
-            [f"vault/{self.workspace_name}/{patch.relative_path}"],
-            f"Apply Cortex patch: {patch.summary}",
-        )
+            commit_hash = self.git.commit_paths(
+                [f"vault/{self.workspace_name}/{patch.relative_path}"],
+                f"Apply Cortex patch: {patch.summary}",
+            )
         events.append(
             self._event(
                 EventType.AUDIT_COMMITTED,
