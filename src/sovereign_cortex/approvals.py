@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from .events import PatchOperation, ProposedPatch
 from .git_audit import GitAudit
+from .patch_restore import restore_patch_target_on_error
 from .policy import PolicyDecision
 from .vault import Vault
 from .workspace import WorkspaceRegistry
@@ -114,13 +115,14 @@ class ApprovalStore:
         workspace = registry.get(request.workspace)
         vault = Vault(workspace.vault_root)
         self._ensure_patch_is_current(request, workspace.vault_root)
-        vault.apply_patch(request.patch)
 
-        git = GitAudit(self.repo_root)
-        commit_hash = git.commit_paths(
-            [f"vault/{request.workspace}/{request.patch.relative_path}"],
-            f"Approve Cortex patch: {request.patch.summary}",
-        )
+        with restore_patch_target_on_error(workspace.vault_root, request.patch):
+            vault.apply_patch(request.patch)
+            git = GitAudit(self.repo_root)
+            commit_hash = git.commit_paths(
+                [f"vault/{request.workspace}/{request.patch.relative_path}"],
+                f"Approve Cortex patch: {request.patch.summary}",
+            )
 
         updated = request.model_copy(
             update={
