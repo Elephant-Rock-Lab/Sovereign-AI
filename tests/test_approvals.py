@@ -22,6 +22,10 @@ def _rewrite_request(path: Path, request) -> None:
     path.write_text(request.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
 
+def _raise_commit_error(self, paths, message):
+    raise RuntimeError("commit unavailable")
+
+
 def test_orchestrator_saves_pending_approval(tmp_path):
     repo_root = _copy_repo(tmp_path)
     result = LocalOrchestrator(repo_root).handle_command(
@@ -72,6 +76,51 @@ def test_approval_approve_applies_patch_and_moves_request(tmp_path):
     task_text = (repo_root / "vault" / "demo-project" / "tasks" / "launch-website.md").read_text(encoding="utf-8")
     assert "due: '" in task_text or "due: 20" in task_text
     assert "Cortex Notes" in task_text
+
+
+def test_approval_keeps_updated_file_current_when_commit_is_unavailable(tmp_path, monkeypatch):
+    repo_root = _copy_repo(tmp_path)
+    result = LocalOrchestrator(repo_root).handle_command(
+        "Move the website launch task to next Friday and explain the dependency impact",
+        auto_approve=False,
+    )
+    task_path = repo_root / "vault" / "demo-project" / "tasks" / "launch-website.md"
+    before = task_path.read_text(encoding="utf-8")
+    monkeypatch.setattr("sovereign_cortex.approvals.GitAudit.commit_paths", _raise_commit_error)
+
+    with pytest.raises(RuntimeError, match="commit unavailable"):
+        ApprovalStore(repo_root).approve(result.approval_id)
+
+    assert task_path.read_text(encoding="utf-8") == before
+    assert (repo_root / "approval_requests" / "pending" / f"{result.approval_id}.json").exists()
+    assert not (repo_root / "approval_requests" / "approved" / f"{result.approval_id}.json").exists()
+
+
+def test_approval_removes_created_file_when_commit_is_unavailable(tmp_path, monkeypatch):
+    repo_root = _copy_repo(tmp_path)
+    target = repo_root / "vault" / "demo-project" / "tasks" / "new-audit-task.md"
+    store = ApprovalStore(repo_root)
+    request = store.create(
+        workspace="demo-project",
+        command_text="Create a new audit task",
+        correlation_id="test-correlation",
+        patch=ProposedPatch(
+            operation=PatchOperation.CREATE_FILE,
+            relative_path="tasks/new-audit-task.md",
+            before=None,
+            after="---\nid: new-audit-task\ntitle: New Audit Task\n---\n# New Audit Task\n",
+            summary="Create new audit task.",
+        ),
+        policy_decision=PolicyDecision(allowed=True, approval_required=True, reason="ok"),
+    )
+    monkeypatch.setattr("sovereign_cortex.approvals.GitAudit.commit_paths", _raise_commit_error)
+
+    with pytest.raises(RuntimeError, match="commit unavailable"):
+        store.approve(request.approval_id)
+
+    assert not target.exists()
+    assert (repo_root / "approval_requests" / "pending" / f"{request.approval_id}.json").exists()
+    assert not (repo_root / "approval_requests" / "approved" / f"{request.approval_id}.json").exists()
 
 
 def test_approval_rejects_stale_update_and_keeps_request_pending(tmp_path):
